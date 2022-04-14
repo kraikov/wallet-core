@@ -1,3 +1,4 @@
+import { Client } from '@liquality/client';
 import BN, { BigNumber } from 'bignumber.js';
 import JSBI from 'jsbi';
 import { v4 as uuidv4 } from 'uuid';
@@ -17,6 +18,9 @@ import { prettyBalance } from '../../utils/coinFormatter';
 import { ChainNetworks } from '../../utils/networks';
 import { withInterval, withLock } from '../../store/actions/performNextAction/utils';
 import { SwapProvider } from '../SwapProvider';
+import { Network } from '../../store/types';
+import { EvmChainProvider, EvmSwapProvider, EvmWalletProvider } from '@liquality/evm';
+import { TxStatus } from '@liquality/types';
 
 const SWAP_DEADLINE = 30 * 60; // 30 minutes
 
@@ -27,11 +31,19 @@ class UniswapSwapProvider extends SwapProvider {
     this._apiCache = {};
   }
 
+  getClient(network: Network, walletId, asset, accountId) {
+    return super.getClient(network, walletId, asset, accountId) as Client<
+      EvmChainProvider,
+      EvmWalletProvider,
+      EvmSwapProvider
+    >;
+  }
+
   async getSupportedPairs() {
     return [];
   }
 
-  getApi(network, asset) {
+  getApi(network: Network, asset: string) {
     const fromChain = cryptoassets[asset].chain;
     const chainId = ChainNetworks[fromChain][network].chainId;
     if (chainId in this._apiCache) {
@@ -64,9 +76,14 @@ class UniswapSwapProvider extends SwapProvider {
 
   async getQuote({ network, from, to, amount }) {
     // Uniswap only provides liquidity for ethereum tokens
-    if (!isEthereumChain(from) || !isEthereumChain(to)) return null;
+    if (!isEthereumChain(from) || !isEthereumChain(to)) {
+      return null;
+    }
+
     // Only uniswap on ethereum is supported atm
-    if (cryptoassets[from].chain !== 'ethereum' || cryptoassets[to].chain !== 'ethereum') return null;
+    if (cryptoassets[from].chain !== 'ethereum' || cryptoassets[to].chain !== 'ethereum') {
+      return null;
+    }
 
     const chainId = ChainNetworks[cryptoassets[from].chain][network].chainId;
 
@@ -98,16 +115,13 @@ class UniswapSwapProvider extends SwapProvider {
     const trade = new Trade(route, tokenAmount, TradeType.EXACT_INPUT);
 
     const toAmountInUnit = currencyToUnit(cryptoassets[to], new BN(trade.outputAmount.toExact()));
-    return {
-      from,
-      to,
-      fromAmount: fromAmountInUnit,
-      toAmount: toAmountInUnit,
-    };
+    return { from, to, fromAmount: fromAmountInUnit, toAmount: toAmountInUnit };
   }
 
   async requiresApproval({ network, walletId, quote }) {
-    if (!isERC20(quote.from)) return false;
+    if (!isERC20(quote.from)) {
+      return false;
+    }
 
     const fromChain = cryptoassets[quote.from].chain;
     const api = this.getApi(network, quote.from);
@@ -146,27 +160,15 @@ class UniswapSwapProvider extends SwapProvider {
   }
 
   async approveTokens({ network, walletId, quote }) {
-    const requiresApproval = await this.requiresApproval({
-      network,
-      walletId,
-      quote,
-    });
+    const requiresApproval = await this.requiresApproval({ network, walletId, quote });
     if (!requiresApproval) {
-      return {
-        status: 'APPROVE_CONFIRMED',
-      };
+      return { status: 'APPROVE_CONFIRMED' };
     }
 
     const txData = await this.buildApprovalTx({ network, walletId, quote });
-
     const client = this.getClient(network, walletId, quote.from, quote.fromAccountId);
-    const approveTx = await client.chain.sendTransaction(txData);
-
-    return {
-      status: 'WAITING_FOR_APPROVE_CONFIRMATIONS',
-      approveTx,
-      approveTxHash: approveTx.hash,
-    };
+    const approveTx = await client.wallet.sendTransaction(txData);
+    return { status: 'WAITING_FOR_APPROVE_CONFIRMATIONS', approveTx, approveTxHash: approveTx.hash };
   }
 
   async buildSwapTx({ network, walletId, quote }) {
@@ -234,7 +236,7 @@ class UniswapSwapProvider extends SwapProvider {
     const client = this.getClient(network, walletId, quote.from, quote.fromAccountId);
 
     await this.sendLedgerNotification(quote.fromAccountId, 'Signing required to complete the swap.');
-    const swapTx = await client.chain.sendTransaction(txData);
+    const swapTx = await client.wallet.sendTransaction(txData);
 
     return {
       status: 'WAITING_FOR_SWAP_CONFIRMATIONS',
@@ -262,7 +264,7 @@ class UniswapSwapProvider extends SwapProvider {
 
     const nativeAsset = chains[cryptoassets[asset].chain].nativeAsset;
     const account = this.getAccount(quote.fromAccountId);
-    const client = this.getClient(network, walletId, quote.from, account?.type);
+    const client = this.getClient(network, walletId, quote.from, account?.type) as Client<EvmChainProvider>;
 
     let gasLimit = 0;
     if (await this.requiresApproval({ network, walletId, quote })) {
@@ -278,7 +280,7 @@ class UniswapSwapProvider extends SwapProvider {
         value: '0x' + approvalTx.value.toString(16),
       };
 
-      gasLimit += await client.getMethod('estimateGas')(rawApprovalTx);
+      gasLimit += (await client.chain.getProvider().estimateGas(rawApprovalTx)).toNumber();
     }
 
     const swapTx = await this.buildSwapTx({ network, walletId, quote });
@@ -288,7 +290,7 @@ class UniswapSwapProvider extends SwapProvider {
       data: swapTx.data,
       value: '0x' + swapTx.value.toString(16),
     };
-    gasLimit += await client.getMethod('estimateGas')(rawSwapTx);
+    gasLimit += (await client.chain.getProvider().estimateGas(rawSwapTx)).toNumber();
 
     const fees = {};
     for (const feePrice of feePrices) {
@@ -305,14 +307,14 @@ class UniswapSwapProvider extends SwapProvider {
     try {
       const tx = await client.chain.getTransactionByHash(swap.approveTxHash);
       if (tx && tx.confirmations && tx.confirmations > 0) {
-        return {
-          endTime: Date.now(),
-          status: 'APPROVE_CONFIRMED',
-        };
+        return { endTime: Date.now(), status: 'APPROVE_CONFIRMED' };
       }
     } catch (e) {
-      if (e.name === 'TxNotFoundError') console.warn(e);
-      else throw e;
+      if (e.name === 'TxNotFoundError') {
+        console.warn(e);
+      } else {
+        throw e;
+      }
     }
   }
 
@@ -323,12 +325,9 @@ class UniswapSwapProvider extends SwapProvider {
       const tx = await client.chain.getTransactionByHash(swap.swapTxHash);
       if (tx && tx.confirmations && tx.confirmations > 0) {
         // Check transaction status - it may fail due to slippage
-        const { status } = await client.getMethod('getTransactionReceipt')(swap.swapTxHash);
+        const { status } = tx;
         this.updateBalances(network, walletId, [swap.from]);
-        return {
-          endTime: Date.now(),
-          status: Number(status) === 1 ? 'SUCCESS' : 'FAILED',
-        };
+        return { endTime: Date.now(), status: status === TxStatus.Success ? 'SUCCESS' : 'FAILED' };
       }
     } catch (e) {
       if (e.name === 'TxNotFoundError') console.warn(e);

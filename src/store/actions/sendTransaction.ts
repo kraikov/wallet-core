@@ -6,31 +6,9 @@ export const sendTransaction = async (
   { dispatch, commit, getters },
   { network, walletId, accountId, asset, to, amount, data, fee, gas, feeLabel, fiatRate }
 ) => {
-  const client = getters.client({
-    network,
-    walletId,
-    asset,
-    accountId,
-  });
+  const client = getters.client({ network, walletId, asset, accountId });
 
-  const originalEstimateGas = client._providers[0].estimateGas;
-  if (gas) {
-    client._providers[0].estimateGas = async () => {
-      return gas;
-    };
-  }
-
-  let tx;
-  try {
-    tx = await client.chain.sendTransaction({
-      to,
-      value: new BN(amount),
-      data,
-      fee,
-    });
-  } finally {
-    client._providers[0].estimateGas = originalEstimateGas;
-  }
+  const tx = await client.wallet.sendTransaction({ to, value: new BN(amount), data, gasLimit: gas, fee });
 
   const transaction = {
     id: uuidv4(),
@@ -51,19 +29,9 @@ export const sendTransaction = async (
     fiatRate,
   };
 
-  commit('NEW_TRASACTION', {
-    network,
-    walletId,
-    accountId,
-    transaction,
-  });
+  commit('NEW_TRASACTION', { network, walletId, accountId, transaction });
 
-  dispatch('performNextAction', {
-    network,
-    walletId,
-    id: transaction.id,
-    accountId,
-  });
+  dispatch('performNextAction', { network, walletId, id: transaction.id, accountId });
 
   createHistoryNotification(transaction);
 

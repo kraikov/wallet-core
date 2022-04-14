@@ -267,11 +267,6 @@ class LiqualityBoostERC20toNative extends SwapProvider {
       step: 2,
       label: 'Locking {bridgeAsset}',
     },
-    FUNDED: {
-      ...LiqualitySwapProvider.statuses.FUNDED,
-      step: 3,
-      label: 'Locking {bridgeAsset}',
-    },
     CONFIRM_COUNTER_PARTY_INITIATION: {
       ...LiqualitySwapProvider.statuses.CONFIRM_COUNTER_PARTY_INITIATION,
       label: 'Locking {bridgeAsset}',

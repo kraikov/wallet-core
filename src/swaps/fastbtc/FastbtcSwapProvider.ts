@@ -7,6 +7,8 @@ import { chains, currencyToUnit, unitToCurrency } from '@liquality/cryptoassets'
 import { withInterval } from '../../store/actions/performNextAction/utils';
 import { prettyBalance } from '../../utils/coinFormatter';
 import cryptoassets from '../../utils/cryptoassets';
+import { Client } from '@liquality/client';
+import { BitcoinBaseWalletProvider, BitcoinEsploraApiProvider } from '@liquality/bitcoin';
 
 const fastBtcSatoshiFee = 5000;
 const fastBtcPercentageFee = 0.2;
@@ -102,7 +104,7 @@ class FastbtcSwapProvider extends SwapProvider {
     const relayAddress = await this._getAddress(toAddress);
 
     await this.sendLedgerNotification(quote.fromAccountId, 'Signing required to complete the swap.');
-    const swapTx = await client.chain.sendTransaction({
+    const swapTx = await client.wallet.sendTransaction({
       to: relayAddress.btcadr,
       value: new BN(quote.fromAmount),
       data: '',
@@ -128,10 +130,13 @@ class FastbtcSwapProvider extends SwapProvider {
 
   async estimateFees({ network, walletId, asset, txType, quote, feePrices, max }) {
     if (txType === FastbtcSwapProvider.txTypes.SWAP && asset === 'BTC') {
-      const client = this.getClient(network, walletId, asset, quote.fromAccountId);
+      const client = this.getClient(network, walletId, asset, quote.fromAccountId) as Client<
+        BitcoinEsploraApiProvider,
+        BitcoinBaseWalletProvider
+      >;
       const value = max ? undefined : new BN(quote.fromAmount);
       const txs = feePrices.map((fee) => ({ to: '', value, fee }));
-      const totalFees = await client.getMethod('getTotalFees')(txs, max);
+      const totalFees = await client.wallet.getTotalFees(txs, max);
       return mapValues(totalFees, (f) => unitToCurrency(cryptoassets[asset], f));
     }
     return null;

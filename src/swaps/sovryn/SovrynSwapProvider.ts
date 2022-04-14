@@ -1,3 +1,4 @@
+import { Client } from '@liquality/client';
 import BN from 'bignumber.js';
 import { v4 as uuidv4 } from 'uuid';
 import * as ethers from 'ethers';
@@ -15,6 +16,8 @@ import SovrynSwapNetworkABI from '@blobfishkate/sovryncontracts/abi/abiSovrynSwa
 import RBTCWrapperProxyABI from '@blobfishkate/sovryncontracts/abi/abiWrapperProxy_new.json';
 import SovrynMainnetAddresses from '@blobfishkate/sovryncontracts/contracts-mainnet.json';
 import SovrynTestnetAddresses from '@blobfishkate/sovryncontracts/contracts-testnet.json';
+import { EvmChainProvider } from '@liquality/evm';
+import { TxStatus } from '@liquality/types';
 
 // use WRBTC address for RBTC native token
 const wrappedRbtcAddress = {
@@ -151,7 +154,7 @@ class SovrynSwapProvider extends SwapProvider {
 
     const txData = await this.buildApprovalTx({ network, walletId, quote });
     const client = this.getClient(network, walletId, quote.from, quote.fromAccountId);
-    const approveTx = await client.chain.sendTransaction(txData);
+    const approveTx = await client.wallet.sendTransaction(txData);
 
     return {
       status: 'WAITING_FOR_APPROVE_CONFIRMATIONS',
@@ -215,7 +218,7 @@ class SovrynSwapProvider extends SwapProvider {
     const client = this.getClient(network, walletId, quote.from, quote.fromAccountId);
 
     await this.sendLedgerNotification(quote.fromAccountId, 'Signing required to complete the swap.');
-    const swapTx = await client.chain.sendTransaction(txData);
+    const swapTx = await client.wallet.sendTransaction(txData);
 
     return {
       status: 'WAITING_FOR_SWAP_CONFIRMATIONS',
@@ -227,11 +230,13 @@ class SovrynSwapProvider extends SwapProvider {
   //  ======== FEES ========
 
   async estimateFees({ network, walletId, asset, txType, quote, feePrices }) {
-    if (txType !== SovrynSwapProvider.fromTxType) throw new Error(`Invalid tx type ${txType}`);
+    if (txType !== SovrynSwapProvider.fromTxType) {
+      throw new Error(`Invalid tx type ${txType}`);
+    }
 
     const nativeAsset = chains[cryptoassets[asset].chain].nativeAsset;
     const account = this.getAccount(quote.fromAccountId);
-    const client = this.getClient(network, walletId, quote.from, account?.type);
+    const client = this.getClient(network, walletId, quote.from, account?.type) as Client<EvmChainProvider>;
 
     let gasLimit = 0;
     if (await this.requiresApproval({ network, walletId, quote })) {
@@ -247,7 +252,7 @@ class SovrynSwapProvider extends SwapProvider {
         value: '0x' + approvalTx.value.toString(16),
       };
 
-      gasLimit += await client.getMethod('estimateGas')(rawApprovalTx);
+      gasLimit += (await client.chain.getProvider().estimateGas(rawApprovalTx)).toNumber();
     }
 
     // Due to a problem on RSK network with incorrect gas estimations, the gas used by swap transaction
@@ -291,11 +296,11 @@ class SovrynSwapProvider extends SwapProvider {
       const tx = await client.chain.getTransactionByHash(swap.swapTxHash);
       if (tx && tx.confirmations && tx.confirmations > 0) {
         // Check transaction status - it may fail due to slippage
-        const { status } = await client.getMethod('getTransactionReceipt')(swap.swapTxHash);
+        const { status } = tx;
         this.updateBalances(network, walletId, [swap.from]);
         return {
           endTime: Date.now(),
-          status: Number(status) === 1 ? 'SUCCESS' : 'FAILED',
+          status: status === TxStatus.Success ? 'SUCCESS' : 'FAILED',
         };
       }
     } catch (e) {

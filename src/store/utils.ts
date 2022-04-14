@@ -3,12 +3,9 @@ import EventEmitter from 'events';
 import { random, findKey, mapKeys, mapValues } from 'lodash';
 import axios from 'axios';
 import cryptoassets from '../utils/cryptoassets';
-import { Client } from '@liquality/client';
-import { EthereumRpcProvider } from '@liquality/ethereum-rpc-provider';
-import { EthereumJsWalletProvider } from '@liquality/ethereum-js-wallet-provider';
-import { EthereumErc20Provider } from '@liquality/ethereum-erc20-provider';
+import { EvmChainProvider, EvmWalletProvider } from '@liquality/evm';
 import { ChainNetworks } from '../utils/networks';
-import buildConfig from '../build.config';
+import { ChainId } from '@liquality/cryptoassets';
 
 export const CHAIN_LOCK = {};
 
@@ -51,14 +48,16 @@ const COIN_GECKO_API = 'https://api.coingecko.com/api/v3';
 
 const getRskERC20Assets = () => {
   const erc20 = Object.keys(cryptoassets).filter(
-    (asset) => cryptoassets[asset].chain === 'rsk' && cryptoassets[asset].type === 'erc20'
+    (asset) => cryptoassets[asset].chain === ChainId.Rootstock && cryptoassets[asset].type === 'erc20'
   );
 
   return erc20.map((erc) => cryptoassets[erc]);
 };
 
 export const shouldApplyRskLegacyDerivation = async (accounts, mnemonic?, indexPath = 0) => {
-  const rskERC20Assets = getRskERC20Assets();
+  const rskERC20Assets = getRskERC20Assets().map((asset) => {
+    return { ...asset, isNative: asset.type === 'native' };
+  });
   const walletIds = Object.keys(accounts);
 
   const addresses = [];
@@ -73,31 +72,19 @@ export const shouldApplyRskLegacyDerivation = async (accounts, mnemonic?, indexP
     });
   });
 
-  const client = new Client().addProvider(new EthereumRpcProvider({ uri: buildConfig.rskRpcUrls.mainnet }));
-
   if (mnemonic) {
-    client.addProvider(
-      new EthereumJsWalletProvider({
-        network: ChainNetworks.rsk.mainnet,
-        mnemonic,
-        derivationPath: `m/44'/137'/${indexPath}'/0/0`,
-      })
-    );
+    const walletProvider = new EvmWalletProvider({
+      network: ChainNetworks.rsk.mainnet,
+      mnemonic,
+      derivationPath: `m/44'/137'/${indexPath}'/0/0`,
+    });
 
-    const _addresses = await client.wallet.getAddresses();
-
+    const _addresses = await walletProvider.getAddresses();
     addresses.push(..._addresses.map((e) => e.address));
   }
 
-  const erc20BalancesPromises = rskERC20Assets.map((asset) => {
-    const client = new Client()
-      .addProvider(new EthereumRpcProvider({ uri: 'https://public-node.rsk.co' }))
-      .addProvider(new EthereumErc20Provider(asset.contractAddress));
-
-    return client.chain.getBalance(addresses);
-  });
-
-  const balances = await Promise.all([client.chain.getBalance(addresses), ...erc20BalancesPromises]);
+  const chainProvider = new EvmChainProvider(ChainNetworks.rsk.mainnet);
+  const balances = await chainProvider.getBalance(addresses, rskERC20Assets);
 
   return balances.some((amount) => amount.isGreaterThan(0));
 };

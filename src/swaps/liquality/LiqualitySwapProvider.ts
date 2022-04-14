@@ -8,9 +8,10 @@ import pkg from '../../../package.json';
 import { withLock, withInterval } from '../../store/actions/performNextAction/utils';
 import { timestamp, wait } from '../../store/utils';
 import { prettyBalance } from '../../utils/coinFormatter';
-import { isERC20 } from '../../utils/asset';
 import cryptoassets from '../../utils/cryptoassets';
 import { getTxFee } from '../../utils/fees';
+import { BitcoinBaseWalletProvider, BitcoinEsploraApiProvider } from '@liquality/bitcoin';
+import { Client } from '@liquality/client';
 
 export const VERSION_STRING = `Wallet ${pkg.version} (CAL ${pkg.dependencies['@liquality/client']
   .replace('^', '')
@@ -129,8 +130,10 @@ class LiqualitySwapProvider extends SwapProvider {
     const secret = await fromClient.swap.generateSecret(messageHex);
     const secretHash = sha256(secret);
 
+    const asset = cryptoassets[quote.from];
     const fromFundTx = await fromClient.swap.initiateSwap(
       {
+        asset: { ...asset, isNative: asset.type === 'native' } as any,
         value: new BN(quote.fromAmount),
         recipientAddress: quote.fromCounterPartyAddress,
         refundAddress: quote.fromAddress,
@@ -152,10 +155,13 @@ class LiqualitySwapProvider extends SwapProvider {
 
   async estimateFees({ network, walletId, asset, txType, quote, feePrices, max }) {
     if (txType === LiqualitySwapProvider.txTypes.SWAP_INITIATION && asset === 'BTC') {
-      const client = this.getClient(network, walletId, asset, quote.fromAccountId);
+      const client = this.getClient(network, walletId, asset, quote.fromAccountId) as Client<
+        BitcoinEsploraApiProvider,
+        BitcoinBaseWalletProvider
+      >;
       const value = max ? undefined : new BN(quote.fromAmount);
       const txs = feePrices.map((fee) => ({ to: '', value, fee }));
-      const totalFees = await client.getMethod('getTotalFees')(txs, max);
+      const totalFees = await client.wallet.getTotalFees(txs, max);
       return mapValues(totalFees, (f) => unitToCurrency(cryptoassets[asset], f));
     }
 
@@ -257,39 +263,6 @@ class LiqualitySwapProvider extends SwapProvider {
     }
   }
 
-  async fundSwap({ swap, network, walletId }) {
-    if (await this.hasQuoteExpired({ swap })) {
-      return { status: 'QUOTE_EXPIRED' };
-    }
-
-    if (!isERC20(swap.from)) return { status: 'FUNDED' }; // Skip. Only ERC20 swaps need funding
-
-    const fromClient = this.getClient(network, walletId, swap.from, swap.fromAccountId);
-
-    await this.sendLedgerNotification(swap.fromAccountId, 'Signing required to fund the swap.');
-
-    const fundTx = await fromClient.swap.fundSwap(
-      {
-        value: new BN(swap.fromAmount),
-        recipientAddress: swap.fromCounterPartyAddress,
-        refundAddress: swap.fromAddress,
-        secretHash: swap.secretHash,
-        expiration: swap.swapExpiration,
-      },
-      swap.fromFundHash,
-      swap.fee
-    );
-
-    if (!fundTx) {
-      throw new Error('Funding transaction returned null');
-    }
-
-    return {
-      fundTxHash: fundTx.hash,
-      status: 'FUNDED',
-    };
-  }
-
   async reportInitiation({ swap }) {
     if (await this.hasQuoteExpired({ swap })) {
       return { status: 'WAITING_FOR_REFUND' };
@@ -330,8 +303,12 @@ class LiqualitySwapProvider extends SwapProvider {
   async findCounterPartyInitiation({ swap, network, walletId }) {
     const toClient = this.getClient(network, walletId, swap.to, swap.toAccountId);
 
+    const toAsset = cryptoassets[swap.to];
+    const asset = { ...toAsset, isNative: toAsset.type === 'native' } as any;
+
     try {
       const tx = await toClient.swap.findInitiateSwapTransaction({
+        asset: asset,
         value: new BN(swap.toAmount),
         recipientAddress: swap.toAddress,
         refundAddress: swap.toCounterPartyAddress,
@@ -340,38 +317,23 @@ class LiqualitySwapProvider extends SwapProvider {
       });
 
       if (tx) {
-        const toFundHash = tx.hash;
+        const initiateTxHash = tx.hash;
 
         const isVerified = await toClient.swap.verifyInitiateSwapTransaction(
           {
+            asset: asset,
             value: new BN(swap.toAmount),
             recipientAddress: swap.toAddress,
             refundAddress: swap.toCounterPartyAddress,
             secretHash: swap.secretHash,
             expiration: swap.nodeSwapExpiration,
           },
-          toFundHash
+          initiateTxHash
         );
 
-        // ERC20 swaps have separate funding tx. Ensures funding tx has enough confirmations
-        const fundingTransaction = await toClient.swap.findFundSwapTransaction(
-          {
-            value: new BN(swap.toAmount),
-            recipientAddress: swap.toAddress,
-            refundAddress: swap.toCounterPartyAddress,
-            secretHash: swap.secretHash,
-            expiration: swap.nodeSwapExpiration,
-          },
-          toFundHash
-        );
-        const fundingConfirmed = fundingTransaction
-          ? fundingTransaction.confirmations &&
-            fundingTransaction.confirmations >= chains[cryptoassets[swap.to].chain].safeConfirmations
-          : true;
-
-        if (isVerified && fundingConfirmed) {
+        if (isVerified) {
           return {
-            toFundHash,
+            initiateTxHash,
             status: 'CONFIRM_COUNTER_PARTY_INITIATION',
           };
         }
@@ -429,8 +391,12 @@ class LiqualitySwapProvider extends SwapProvider {
 
     await this.sendLedgerNotification(swap.toAccountId, 'Signing required to claim the swap.');
 
+    const toAsset = cryptoassets[swap.to];
+    const asset = { ...toAsset, isNative: toAsset.type === 'native' } as any;
+
     const toClaimTx = await toClient.swap.claimSwap(
       {
+        asset,
         value: new BN(swap.toAmount),
         recipientAddress: swap.toAddress,
         refundAddress: swap.toCounterPartyAddress,
@@ -505,8 +471,12 @@ class LiqualitySwapProvider extends SwapProvider {
   async refundSwap({ swap, network, walletId }) {
     const fromClient = this.getClient(network, walletId, swap.from, swap.fromAccountId);
     await this.sendLedgerNotification(swap.fromAccountId, 'Signing required to refund the swap.');
+    const fromAsset = cryptoassets[swap.to];
+    const asset = { ...fromAsset, isNative: fromAsset.type === 'native' } as any;
+
     const refundTx = await fromClient.swap.refundSwap(
       {
+        asset,
         value: new BN(swap.fromAmount),
         recipientAddress: swap.fromCounterPartyAddress,
         refundAddress: swap.fromAddress,
@@ -536,12 +506,6 @@ class LiqualitySwapProvider extends SwapProvider {
         break;
 
       case 'INITIATION_CONFIRMED':
-        updates = await withLock(store, { item: swap, network, walletId, asset: swap.from }, async () =>
-          this.fundSwap({ swap, network, walletId })
-        );
-        break;
-
-      case 'FUNDED':
         updates = await withInterval(async () => this.findCounterPartyInitiation({ swap, network, walletId }));
         break;
 
@@ -631,12 +595,6 @@ class LiqualitySwapProvider extends SwapProvider {
     INITIATION_CONFIRMED: {
       step: 0,
       label: 'Locking {from}',
-      filterStatus: 'PENDING',
-    },
-
-    FUNDED: {
-      step: 1,
-      label: 'Locking {to}',
       filterStatus: 'PENDING',
     },
     CONFIRM_COUNTER_PARTY_INITIATION: {

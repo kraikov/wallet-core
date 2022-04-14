@@ -1,3 +1,4 @@
+import { TxStatus } from '@liquality/types';
 import axios from 'axios';
 import BN from 'bignumber.js';
 import { SwapProvider } from '../SwapProvider';
@@ -14,6 +15,7 @@ import ERC20 from '@uniswap/v2-core/build/ERC20.json';
 
 const nativeAssetAddress = '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
 const slippagePercentage = 0.5;
+// TODO: remove this. The rpc urls are inside the network object
 const chainToRpcProviders = {
   1: `https://mainnet.infura.io/v3/${buildConfig.infuraApiKey}`,
   56: 'https://bsc-dataseed.binance.org',
@@ -91,7 +93,7 @@ class OneinchSwapProvider extends SwapProvider {
     });
 
     const client = this.getClient(network, walletId, quote.from, quote.fromAccountId);
-    const approveTx = await client.chain.sendTransaction({
+    const approveTx = await client.wallet.sendTransaction({
       to: callData.data?.to,
       value: callData.data?.value,
       data: callData.data?.data,
@@ -143,7 +145,7 @@ class OneinchSwapProvider extends SwapProvider {
     }
 
     await this.sendLedgerNotification(quote.fromAccountId, 'Signing required to complete the swap.');
-    const swapTx = await client.chain.sendTransaction({
+    const swapTx = await client.wallet.sendTransaction({
       to: trade.data.tx?.to,
       value: trade.data.tx?.value,
       data: trade.data.tx?.data,
@@ -213,11 +215,11 @@ class OneinchSwapProvider extends SwapProvider {
       const tx = await client.chain.getTransactionByHash(swap.swapTxHash);
       if (tx && tx.confirmations && tx.confirmations > 0) {
         // Check transaction status - it may fail due to slippage
-        const { status } = await client.getMethod('getTransactionReceipt')(swap.swapTxHash);
+        const { status } = tx;
         this.updateBalances(network, walletId, [swap.from]);
         return {
           endTime: Date.now(),
-          status: Number(status) === 1 ? 'SUCCESS' : 'FAILED',
+          status: status === TxStatus.Success ? 'SUCCESS' : 'FAILED',
         };
       }
     } catch (e) {

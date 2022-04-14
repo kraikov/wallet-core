@@ -1,8 +1,8 @@
-import { BitcoinNetworks } from '@liquality/bitcoin-networks';
-import { EthereumNetworks } from '@liquality/ethereum-networks';
-import { NearNetworks } from '@liquality/near-networks';
-import { SolanaNetworks } from '@liquality/solana-networks';
-import { TerraNetworks } from '@liquality/terra-networks';
+import { BitcoinNetworks } from '@liquality/bitcoin';
+import { EvmNetworks } from '@liquality/evm';
+import { NearNetworks } from '@liquality/near';
+import { TerraNetworks } from '@liquality/terra';
+import buildConfig from '../build.config';
 import { Network } from '../store/types';
 
 export const Networks = [Network.Mainnet, Network.Testnet];
@@ -12,50 +12,94 @@ export const ChainNetworks = {
     testnet: BitcoinNetworks.bitcoin_testnet,
     mainnet: BitcoinNetworks.bitcoin,
   },
+
   ethereum: {
-    testnet: EthereumNetworks.ropsten,
-    mainnet: EthereumNetworks.ethereum_mainnet,
+    testnet: {
+      ...EvmNetworks.ropsten,
+      rpcUrl: `https://ropsten.infura.io/v3/${buildConfig.infuraApiKey}`,
+    },
+    mainnet: {
+      ...EvmNetworks.ethereum_mainnet,
+      rpcUrl: `https://mainnet.infura.io/v3/${buildConfig.infuraApiKey}`,
+    },
   },
+
   rsk: {
-    testnet: EthereumNetworks.rsk_testnet,
-    mainnet: EthereumNetworks.rsk_mainnet,
+    testnet: {
+      ...EvmNetworks.rsk_testnet,
+      rpcUrl: buildConfig.rskRpcUrls.testnet,
+    },
+    mainnet: {
+      ...EvmNetworks.rsk_mainnet,
+      rpcUrl: buildConfig.rskRpcUrls.mainnet,
+    },
   },
+
   bsc: {
-    testnet: EthereumNetworks.bsc_testnet,
-    mainnet: EthereumNetworks.bsc_mainnet,
+    testnet: {
+      ...EvmNetworks.bsc_testnet,
+      rpcUrl: 'https://data-seed-prebsc-1-s1.binance.org:8545',
+    },
+    mainnet: {
+      ...EvmNetworks.bsc_mainnet,
+      rpcUrl: 'https://bsc-dataseed.binance.org',
+    },
   },
+
   polygon: {
-    testnet: EthereumNetworks.polygon_testnet,
-    mainnet: EthereumNetworks.polygon_mainnet,
+    testnet: {
+      ...EvmNetworks.polygon_testnet,
+      rpcUrl: 'https://rpc-mumbai.maticvigil.com',
+    },
+    mainnet: {
+      ...EvmNetworks.polygon_mainnet,
+      rpcUrl: 'https://polygon-rpc.com',
+    },
   },
+
   arbitrum: {
-    testnet: EthereumNetworks.arbitrum_testnet,
-    mainnet: EthereumNetworks.arbitrum_mainnet,
+    testnet: {
+      ...EvmNetworks.arbitrum_testnet,
+      rpcUrl: 'https://rinkeby.arbitrum.io/rpc',
+    },
+    mainnet: {
+      ...EvmNetworks.arbitrum_mainnet,
+      rpcUrl: `https://arbitrum-mainnet.infura.io/v3/${buildConfig.infuraApiKey}`,
+    },
   },
+
   avalanche: {
-    testnet: EthereumNetworks.avax_testnet,
-    mainnet: EthereumNetworks.avax_mainnet,
+    testnet: {
+      ...EvmNetworks.avax_testnet,
+      rpcUrl: process.env.VUE_APP_AVALANCHE_TESTNET_NODE || 'https://api.avax-test.network/ext/bc/C/rpc',
+    },
+    mainnet: {
+      ...EvmNetworks.avax_mainnet,
+      rpcUrl: process.env.VUE_APP_AVALANCHE_MAINNET_NODE || 'https://api.avax.network/ext/bc/C/rpc',
+    },
   },
+
   near: {
     testnet: NearNetworks.near_testnet,
-    mainnet: NearNetworks.near_mainnet,
+    mainnet: {
+      ...NearNetworks.near_mainnet,
+      rpcUrl: process.env.VUE_APP_NEAR_MAINNET_URL || NearNetworks.near_mainnet.rpcUrl,
+    },
   },
-  solana: {
-    testnet: SolanaNetworks.solana_testnet,
-    mainnet: SolanaNetworks.solana_mainnet,
-  },
+
   terra: {
     testnet: TerraNetworks.terra_testnet,
-    mainnet: TerraNetworks.terra_mainnet,
+    mainnet: {
+      ...TerraNetworks.terra_mainnet,
+      rpcUrl: process.env.VUE_APP_TERRA_MAINNET_URL || TerraNetworks.terra_mainnet.rpcUrl,
+    },
   },
+
   fuse: {
     testnet: {
-      name: 'fuse_testnet',
-      coinType: '60',
-      networkId: 123,
-      chainId: 123,
-      isTestnet: true,
-    }, // TODO: change to EthereumNetworks.fuse_testnet after chainabstractionlayer/pull/491 is merged
-    mainnet: EthereumNetworks.fuse_mainnet,
+      ...EvmNetworks.fuse_testnet,
+      rpcUrl: 'https://rpc.fusespark.io',
+    },
+    mainnet: { ...EvmNetworks.fuse_mainnet, rpcUrl: 'https://rpc.fuse.io' },
   },
 };

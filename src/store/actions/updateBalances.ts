@@ -4,6 +4,7 @@ import { ChainId } from '@liquality/cryptoassets';
 import { Network } from '../types';
 import { rootActionContext } from '..';
 import { Asset } from '../types';
+import cryptoassets from '../../utils/cryptoassets';
 
 export const updateBalances = async (
   context,
@@ -27,6 +28,7 @@ export const updateBalances = async (
         assets,
         async (asset) => {
           let addresses: Address[] = [];
+
           const _client = client({
             network,
             walletId,
@@ -38,16 +40,22 @@ export const updateBalances = async (
             addresses = account.addresses
               .filter((a) => typeof a === 'string')
               .map((address) => {
-                return new Address({
-                  address: `${address}`,
-                });
+                return new Address({ address: `${address}` });
               });
           } else {
             addresses = await _client.wallet.getUsedAddresses();
           }
 
+          const _asset = cryptoassets[asset];
           try {
-            const balance = addresses.length === 0 ? '0' : (await _client.chain.getBalance(addresses)).toString();
+            const balance =
+              addresses.length === 0
+                ? '0'
+                : (
+                    await _client.chain.getBalance(addresses, [
+                      { ..._asset, isNative: _asset.type === 'native' } as any,
+                    ])
+                  )[0].toString();
 
             commit.UPDATE_BALANCE({
               network,

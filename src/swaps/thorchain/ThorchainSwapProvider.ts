@@ -1,3 +1,4 @@
+import { Client } from '@liquality/client';
 import BN, { BigNumber } from 'bignumber.js';
 import axios from 'axios';
 import * as ethers from 'ethers';
@@ -21,6 +22,7 @@ import { baseAmount, baseToAsset, assetFromString } from '@xchainjs/xchain-util'
 import { SwapProvider } from '../SwapProvider';
 import { getTxFee } from '../../utils/fees';
 import { mapValues } from 'lodash';
+import { BitcoinBaseWalletProvider, BitcoinEsploraApiProvider } from '@liquality/bitcoin';
 
 // Pool balances are denominated with 8 decimals
 const THORCHAIN_DECIMAL = 8;
@@ -195,7 +197,7 @@ class ThorchainSwapProvider extends SwapProvider {
     const encodedData = erc20.interface.encodeFunctionData('approve', [routerAddress, inputAmountHex]);
 
     const client = this.getClient(network, walletId, quote.from, quote.fromAccountId);
-    const approveTx = await client.chain.sendTransaction({
+    const approveTx = await client.wallet.sendTransaction({
       to: cryptoassets[quote.from].contractAddress!,
       value: new BigNumber(0),
       data: encodedData,
@@ -223,7 +225,7 @@ class ThorchainSwapProvider extends SwapProvider {
     const encodedMemo = Buffer.from(memo, 'utf-8').toString('hex');
 
     const client = this.getClient(network, walletId, quote.from, quote.fromAccountId);
-    const fromFundTx = await client.chain.sendTransaction({
+    const fromFundTx = await client.wallet.sendTransaction({
       to: to,
       value,
       data: encodedMemo,
@@ -260,7 +262,7 @@ class ThorchainSwapProvider extends SwapProvider {
     const value = isERC20(quote.from) ? new BigNumber(0) : new BN(quote.fromAmount);
 
     const client = this.getClient(network, walletId, quote.from, quote.fromAccountId);
-    const fromFundTx = await client.chain.sendTransaction({
+    const fromFundTx = await client.wallet.sendTransaction({
       to: routerAddress,
       value,
       data: encodedData,
@@ -328,17 +330,15 @@ class ThorchainSwapProvider extends SwapProvider {
 
   async estimateFees({ network, walletId, asset, txType, quote, feePrices, max }) {
     if (txType === ThorchainSwapProvider.txTypes.SWAP && asset === 'BTC') {
-      const client = this.getClient(network, walletId, asset, quote.fromAccountId);
+      const client = this.getClient(network, walletId, asset, quote.fromAccountId) as Client<
+        BitcoinEsploraApiProvider,
+        BitcoinBaseWalletProvider
+      >;
       const value = max ? undefined : new BN(quote.fromAmount);
       const memo = await this.makeMemo({ network, walletId, quote });
       const encodedMemo = Buffer.from(memo, 'utf-8').toString('hex');
-      const txs = feePrices.map((fee) => ({
-        to: '',
-        value,
-        data: encodedMemo,
-        fee,
-      }));
-      const totalFees = await client.getMethod('getTotalFees')(txs, max);
+      const txs = feePrices.map((fee) => ({ to: '', value, data: encodedMemo, fee }));
+      const totalFees = await client.wallet.getTotalFees(txs, max);
       return mapValues(totalFees, (f) => unitToCurrency(cryptoassets[asset], f));
     }
 

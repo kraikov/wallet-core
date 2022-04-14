@@ -1,4 +1,5 @@
 import { Address } from '@liquality/types';
+import cryptoassets from '../../utils/cryptoassets';
 
 export const updateAccountBalance = async ({ state, commit, getters }, { network, walletId, accountId }) => {
   const accounts =
@@ -8,24 +9,19 @@ export const updateAccountBalance = async ({ state, commit, getters }, { network
     const account = accounts[index];
     const { assets, type } = account;
     assets.forEach(async (asset) => {
-      const _client = getters.client({
-        network,
-        walletId,
-        asset,
-        accountId,
-      });
+      const _client = getters.client({ network, walletId, asset, accountId });
       let addresses = [];
       if (type.includes('ledger')) {
-        addresses = account.addresses.map(
-          (a) =>
-            new Address({
-              address: `${a}`,
-            })
-        );
+        addresses = account.addresses.map((a) => new Address({ address: `${a}` }));
       } else {
         addresses = await _client.wallet.getUsedAddresses();
       }
-      const balance = addresses.length === 0 ? 0 : (await _client.chain.getBalance(addresses)).toString();
+
+      const _asset = cryptoassets[asset];
+      const balance =
+        addresses.length === 0
+          ? 0
+          : (await _client.chain.getBalance(addresses, [{ ..._asset, isNative: _asset.type === 'native' }])).toString();
 
       commit('UPDATE_BALANCE', {
         network,

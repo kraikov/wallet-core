@@ -4,7 +4,7 @@ import { LCDClient } from '@terra-money/terra.js';
 
 import cryptoassets from '../../utils/cryptoassets';
 import { ChainId, chains, currencyToUnit, unitToCurrency } from '@liquality/cryptoassets';
-import { TerraNetworks } from '@liquality/terra-networks';
+import { TerraNetworks } from '@liquality/terra';
 import { withInterval } from '../../store/actions/performNextAction/utils';
 import { prettyBalance } from '../../utils/coinFormatter';
 
@@ -17,6 +17,7 @@ import {
   getPairAddressQuery,
 } from './queries';
 import { QuoteRequest, SwapProvider } from '../SwapProvider';
+import { TxStatus } from '@liquality/types';
 
 class AstroportSwapProvider extends SwapProvider {
   async getSupportedPairs() {
@@ -74,7 +75,7 @@ class AstroportSwapProvider extends SwapProvider {
 
     await this.sendLedgerNotification(quote.fromAccountId, 'Signing required to complete the swap.');
 
-    const swapTx = await client.chain.sendTransaction(txData);
+    const swapTx = await client.wallet.sendTransaction(txData);
 
     const updates = {
       status: 'WAITING_FOR_SWAP_CONFIRMATIONS',
@@ -98,11 +99,11 @@ class AstroportSwapProvider extends SwapProvider {
     try {
       const tx = await client.chain.getTransactionByHash(swap.swapTxHash);
       if (tx && tx.confirmations && tx.confirmations > 0) {
-        const { status } = await client.getMethod('getTransactionByHash')(swap.swapTxHash);
+        const { status } = tx;
         this.updateBalances(network, walletId, [swap.from]);
         return {
           endTime: Date.now(),
-          status,
+          status: status === TxStatus.Success ? 'SUCCESS' : 'FAILED',
         };
       }
     } catch (e) {
@@ -149,11 +150,11 @@ class AstroportSwapProvider extends SwapProvider {
   // ======== UTILS ========
 
   _getRPC() {
-    const { chainID, nodeUrl } = TerraNetworks.terra_mainnet;
+    const { chainId, rpcUrl } = TerraNetworks.terra_mainnet;
 
     return new LCDClient({
-      chainID,
-      URL: nodeUrl,
+      chainID: (chainId as string).toString(),
+      URL: rpcUrl as string,
     });
   }
 

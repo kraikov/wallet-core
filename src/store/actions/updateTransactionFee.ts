@@ -40,7 +40,7 @@ export const updateTransactionFee = async (context, { network, walletId, asset, 
     asset,
   });
   try {
-    newTx = await client.chain.updateTransactionFee(oldTx, newFee);
+    newTx = await client.wallet.updateTransactionFee(oldTx, newFee);
   } catch (e) {
     console.warn(e);
     throw e;
